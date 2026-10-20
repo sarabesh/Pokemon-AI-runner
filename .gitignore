@@ -1,0 +1,8 @@
+.venv/
+roms/*
+!roms/.gitkeep
+runs/
+*.state
+__pycache__/
+.env
+!states/*.state

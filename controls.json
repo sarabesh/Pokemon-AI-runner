@@ -1,0 +1,72 @@
+{
+  "source": "probe.py (scripted button tests) + Claude Code driving play.py through the intro, Oak's lab and the first rival battle",
+  "manual": {
+    "action_set": ["a", "b", "up", "down", "left", "right"],
+    "dropped_buttons": [
+      {"button": "start", "reason": "Overworld: opens the START menu (POKEMON/ITEM/name/SAVE/OPTION/EXIT) and blocks walking until B is pressed. A random policy then presses A inside it and wanders into submenus. Pure time sink for the RL agent."},
+      {"button": "select", "reason": "No effect in the overworld (only 11 WRAM bytes change, no state change). Only used to reorder items in menus."}
+    ],
+    "contexts": [
+      {
+        "name": "overworld",
+        "how_to_detect": "env.context() == 'overworld': wIsInBattle (0xD057) == 0 and no window-border tile 0x79 anywhere in wTileMap (0xC3A0-0xC507). Note: scripted cutscenes (e.g. Oak walking you to the lab) also read as overworld; input is ignored then.",
+        "buttons": {
+          "up/down/left/right": "Walk one tile per press (with 8-frame hold). Blocked by walls/objects: position doesn't change but the player turns to face that way.",
+          "a": "Interact with the tile you're facing (people, signs, the SNES, Poke Balls). Opens a text window.",
+          "b": "Nothing (11 WRAM bytes of noise).",
+          "start": "Opens the START menu; 1 B press closes it.",
+          "select": "Nothing."
+        }
+      },
+      {
+        "name": "window (dialogue or menu)",
+        "how_to_detect": "env.context() == 'window': tile 0x79 (box top-left corner) present in wTileMap. Dialogue box sits at tile row 12; START menu at column 10 of row 0.",
+        "buttons": {
+          "a": "Advance dialogue / select the highlighted menu item. YES/NO prompts default to YES.",
+          "b": "Advance dialogue too; in YES/NO prompts selects NO; closes menus.",
+          "up/down": "Move the menu cursor (wCurrentMenuItem 0xCC26).",
+          "left/right": "Nothing in dialogue."
+        }
+      },
+      {
+        "name": "battle",
+        "how_to_detect": "wIsInBattle (0xD057) != 0 (1 = wild, 2 = trainer). Enemy HP is 0xCFE6-0xCFE7 (big-endian).",
+        "buttons": {
+          "a": "Main menu is a 2x2 grid FIGHT/PKMN (top) ITEM/RUN (bottom), cursor starts on FIGHT. A on FIGHT opens the move list with the first move highlighted; A again uses it. Mashing A = always use move 1, which won the first rival battle (Charmander SCRATCH vs Squirtle) in 108 presses.",
+          "b": "Advances battle text; backs out of the move list to the main menu.",
+          "up/down/left/right": "Move the cursor in the 2x2 menu (wCurrentMenuItem 0xCC26 = row; 0xCC25 = cursor column) or the move list.",
+          "danger": "RUN in a trainer battle prints 'No! There's no running from a trainer battle!' and wastes presses."
+        }
+      }
+    ],
+    "movement": "One tile per press with step(hold_frames=8, wait_frames=24). A press into a wall only turns the player. Moving off a door/stairs tile changes map_id (Red's room 38 -> 1F 37 -> Pallet Town 0 -> Oak's Lab 40). Position (0xD362 x, 0xD361 y) is per-map, so novelty must be keyed on (map_id, x, y).",
+    "reward_ideas": [
+      "Exploration: +1 for each new (map_id, x, y) tile. The main driver early on, as in PWhiddy's PokemonRedExperiments.",
+      "New map: bonus for each first visit to a map_id (Pallet 0, Route 1 12, Viridian 1, ...).",
+      "Party level sum (0xD18C + stride 0x2C): reward increases. Rival win took Charmander 5 -> 6.",
+      "Badges (0xD356 popcount): large bonus.",
+      "Battle outcome: penalty when all party HP hits 0 (blackout); small reward for dealing damage (drop in 0xCFE6-7).",
+      "Event flags (wEventFlags 0xD747..) once we want story progress beyond exploration."
+    ],
+    "pitfalls": [
+      "Facing an object and mashing A loops the same dialogue forever (the SNES in Red's room: '...Okay! It's time to go!'). Reward must come from new tiles, not from activity.",
+      "Mashing A on the naming screen types 'A' as the name; the probe ends up with player 'A' and rival 'AA'. Harmless, but start RL from a saved state, not from boot.",
+      "Map id is already 38 (Red's room) during Oak's intro speech, so 'map == 38' doesn't mean the player can walk. Use context() plus a movement check.",
+      "Walking north out of Pallet Town triggers Oak's cutscene; the game is in a window/cutscene for ~100 presses until the starter is chosen.",
+      "The 'received CHARMANDER' jingle ignores input for ~3 seconds; actions during it are wasted, not harmful.",
+      "Party level/HP read 0 for a moment while the starter is being added.",
+      "RUN is useless in trainer battles; PKMN/ITEM menus are time sinks for a random policy in battle."
+    ]
+  },
+  "checkpoints": {
+    "after_intro": "Red's room, can walk, no Pokemon (probe.py, 124 presses from boot)",
+    "before_oak": "Pallet Town north edge, Oak's 'Hey! Wait!' just triggered",
+    "lab_choose": "Oak's lab, about to pick a starter",
+    "got_starter": "Charmander L5 in party, rival dialogue done",
+    "battle_start": "Rival battle intro (Squirtle)",
+    "battle_menu": "Rival battle, 'Go! CHARMANDER!' just before the FIGHT menu",
+    "battle_after_attack": "Rival battle, after trying RUN",
+    "after_rival": "Won the rival battle, Charmander L6, $3175, standing in the lab"
+  },
+  "checkpoint_dir": "runs/cc/states"
+}
